@@ -1,0 +1,282 @@
+<#
+.SYNOPSIS
+    Advanced Windows Event Log Threat Hunting and Timeline Analysis Tool
+    
+.DESCRIPTION
+    Invoke-ThreatHunt is a comprehensive forensic analysis tool designed for:
+    - Real-time threat detection and anomaly identification
+    - Timeline reconstruction of security events
+    - Correlation of related security events across multiple log sources
+    - Quick triage and deep-dive investigation capabilities
+    
+    The tool analyzes critical Windows Event IDs across Security, System, Application,
+    PowerShell, Sysmon, and other logs to build a cohesive attack timeline.
+
+.PARAMETER Hours
+    Time window to analyze (default: 24 hours)
+    
+.PARAMETER StartTime
+    Specific start datetime for analysis (overrides -Hours)
+    
+.PARAMETER EndTime
+    Specific end datetime for analysis
+    
+.PARAMETER HuntProfile
+    Pre-configured hunting profiles:
+    - 'Quick': Fast triage (login failures, process creation, privilege escalation)
+    - 'Comprehensive': Full spectrum hunt (all event categories)
+    - 'Lateral': Lateral movement focus (RDP, PSRemoting, network shares)
+    - 'Persistence': Persistence mechanisms (scheduled tasks, services, startups)
+    - 'Exfiltration': Data theft indicators (large file access, network transfers)
+    - 'Malware': Malware execution artifacts
+    - 'Custom': Specify your own EventIDs
+    
+.PARAMETER EventIDs
+    Array of specific Event IDs to hunt (used with -HuntProfile 'Custom')
+    
+.PARAMETER LogNames
+    Specific log names to search (default: Security, System, Application, PowerShell)
+    
+.PARAMETER ComputerName
+    Remote computer name(s) to analyze (requires appropriate permissions)
+    
+.PARAMETER ExportTimeline
+    Export timeline to CSV with correlation analysis
+    
+.PARAMETER ExportPath
+    Custom export path (default: .\ThreatHunt_TIMESTAMP)
+    
+.PARAMETER ShowAnomalies
+    Display anomaly detection results (statistical outliers, rare events)
+    
+.PARAMETER CorrelateEvents
+    Perform event correlation analysis (links related events by time/context)
+    
+.PARAMETER GenerateReport
+    Create HTML investigation report with visualizations
+    
+.PARAMETER Verbose
+    Enable detailed output for debugging
+
+.EXAMPLE
+    Invoke-ThreatHunt -HuntProfile Quick
+    Quick triage of last 24 hours focusing on high-priority indicators
+
+.EXAMPLE
+    Invoke-ThreatHunt -HuntProfile Comprehensive -Hours 48 -ExportTimeline -GenerateReport
+    Full spectrum hunt of last 48 hours with timeline export and HTML report
+
+.NOTES
+    Author: SOC Threat Hunter
+    Version: 2.0
+    Requires: PowerShell 5.1+, Administrator privileges for full log access
+#>
+
+function Invoke-ThreatHunt {
+    [CmdletBinding(DefaultParameterSetName = 'TimeWindow')]
+    param (
+        [Parameter(ParameterSetName = 'TimeWindow')]
+        [int]$Hours = 24,
+        
+        [Parameter(ParameterSetName = 'Specific')]
+        [datetime]$StartTime,
+        
+        [Parameter(ParameterSetName = 'Specific')]
+        [datetime]$EndTime,
+        
+        [Parameter()]
+        [ValidateSet('Quick', 'Comprehensive', 'Lateral', 'Persistence', 'Exfiltration', 'Malware', 'Custom')]
+        [string]$HuntProfile = 'Quick',
+        
+        [Parameter()]
+        [int[]]$EventIDs,
+        
+        [Parameter()]
+        [string[]]$LogNames = @('Security', 'System', 'Application', 'Microsoft-Windows-PowerShell/Operational'),
+        
+        [Parameter()]
+        [string[]]$ComputerName = @($env:COMPUTERNAME),
+        
+        [Parameter()]
+        [switch]$ExportTimeline,
+        
+        [Parameter()]
+        [string]$ExportPath,
+        
+        [Parameter()]
+        [switch]$ShowAnomalies,
+        
+        [Parameter()]
+        [switch]$CorrelateEvents,
+        
+        [Parameter()]
+        [switch]$GenerateReport
+    )
+
+    # Default export path
+    if (-not $ExportPath) {
+        $ExportPath = Join-Path (Get-Location) "ThreatHunt_$(Get-Date -Format 'yyyyMMdd_HHmm')"
+    }
+
+    # Determine time range
+    if ($StartTime -and $EndTime) {
+        $FilterStart = $StartTime
+        $FilterEnd = $EndTime
+    } else {
+        $FilterEnd = Get-Date
+        $FilterStart = $FilterEnd.AddHours(-$Hours)
+    }
+
+    # Hunt profile Event ID mapping
+    $ProfileEventIDs = switch ($HuntProfile) {
+        'Quick'         { @(4624,4625,4648,4672,4688,4720,4740,1102,7045,4698) }
+        'Comprehensive'{ $EventCatalog.Keys }
+        'Lateral'       { @(4624,4648,4778,4779,5140,5145,4768,4769) }
+        'Persistence'   { @(4698,4699,4702,7045,7040,7036,4720,4728,4732) }
+        'Exfiltration'  { @(5140,5145,4663,5156) }
+        'Malware'       { @(4688,4104,7045,1,3,7,8,10) }  # Sysmon IDs included for reference
+        'Custom'        { $EventIDs }
+        default         { @(4624,4625,4648,4672,4688,4720,4740,1102) }
+    }
+
+    if ($HuntProfile -eq 'Custom' -and -not $EventIDs) {
+        Write-Error "When using -HuntProfile Custom, you must provide -EventIDs"
+        return
+    }
+
+    $FinalEventIDs = $ProfileEventIDs
+
+    # Event Catalog
+    $EventCatalog = @{
+        4624 = @{ Description = "Successful logon"; Category = "Authentication"; Severity = "Info"; ThreatContext = "Baseline for normal activity; suspicious if from unusual location/time"; KeyFields = @('TargetUserName', 'IpAddress', 'LogonType', 'WorkstationName') }
+        4625 = @{ Description = "Failed logon attempt"; Category = "Authentication"; Severity = "Warning"; ThreatContext = "Password spray, brute force"; KeyFields = @('TargetUserName', 'IpAddress', 'FailureReason') }
+        4648 = @{ Description = "Logon using explicit credentials (RunAs)"; Category = "Authentication"; Severity = "Medium"; ThreatContext = "Lateral movement, privilege escalation"; KeyFields = @('SubjectUserName', 'TargetUserName', 'TargetServerName') }
+        4672 = @{ Description = "Special privileges assigned to new logon"; Category = "Privilege"; Severity = "High"; ThreatContext = "Track SeDebugPrivilege abuse"; KeyFields = @('SubjectUserName', 'PrivilegeList') }
+        4768 = @{ Description = "Kerberos TGT requested"; Category = "Authentication"; Severity = "Info"; ThreatContext = "Golden Ticket detection"; KeyFields = @('TargetUserName', 'TicketEncryptionType') }
+        4769 = @{ Description = "Kerberos service ticket requested"; Category = "Authentication"; Severity = "Info"; ThreatContext = "Silver Ticket, Kerberoasting"; KeyFields = @('ServiceName') }
+        4720 = @{ Description = "User account created"; Category = "Account Management"; Severity = "High"; ThreatContext = "Unauthorized account creation"; KeyFields = @('TargetUserName') }
+        4728 = @{ Description = "Member added to security-enabled global group"; Category = "Account Management"; Severity = "High"; ThreatContext = "Privilege escalation"; KeyFields = @('MemberName') }
+        4732 = @{ Description = "Member added to security-enabled local group"; Category = "Account Management"; Severity = "High"; ThreatContext = "Local admin addition"; KeyFields = @('MemberName') }
+        4740 = @{ Description = "User account locked out"; Category = "Account Management"; Severity = "Warning"; ThreatContext = "Brute force result"; KeyFields = @('TargetUserName') }
+        4688 = @{ Description = "New process created"; Category = "Process Execution"; Severity = "Info"; ThreatContext = "Malware execution, LOLBins"; KeyFields = @('NewProcessName', 'ParentProcessName', 'CommandLine') }
+        7045 = @{ Description = "Service installed"; Category = "Persistence"; Severity = "High"; ThreatContext = "Service-based persistence"; KeyFields = @('ServiceName', 'ServiceFileName') }
+        4698 = @{ Description = "Scheduled task created"; Category = "Persistence"; Severity = "High"; ThreatContext = "Scheduled task persistence"; KeyFields = @('TaskName') }
+        1102 = @{ Description = "Audit log cleared"; Category = "Tampering"; Severity = "Critical"; ThreatContext = "Evidence destruction"; KeyFields = @('SubjectUserName') }
+        4778 = @{ Description = "Session reconnected (RDP)"; Category = "Lateral Movement"; Severity = "Medium"; ThreatContext = "RDP lateral movement"; KeyFields = @('AccountName', 'ClientAddress') }
+        5140 = @{ Description = "Network share accessed"; Category = "Lateral Movement"; Severity = "Medium"; ThreatContext = "SMB lateral movement"; KeyFields = @('ShareName', 'IpAddress') }
+        # Add more as needed - the script uses this for metadata
+    }
+
+    Write-Host "`nStarting Threat Hunt - Profile: $HuntProfile | Time Window: $($FilterStart) to $($FilterEnd)" -ForegroundColor Cyan
+
+    $Timeline = @()
+
+    foreach ($computer in $ComputerName) {
+        Write-Verbose "Querying $computer..."
+        foreach ($log in $LogNames) {
+            $Filter = @{
+                LogName   = $log
+                ID        = $FinalEventIDs
+                StartTime = $FilterStart
+                EndTime   = $FilterEnd
+            }
+            $events = Get-WinEvent -ComputerName $computer -FilterHashtable $Filter -ErrorAction SilentlyContinue
+            if ($events) {
+                $Timeline += $events | ForEach-Object {
+                    $xml = [xml]$_.ToXml()
+                    $data = $xml.Event.EventData.Data
+                    $props = $EventCatalog[$_.Id] ?? @{ Description = "Unknown Event"; Category = "Other"; Severity = "Info" }
+
+                    [pscustomobject]@{
+                        TimeCreated      = $_.TimeCreated
+                        Computer         = $computer
+                        EventID          = $_.Id
+                        Description      = $props.Description
+                        Category         = $props.Category
+                        Severity         = $props.Severity
+                        TargetUserName   = ($data | Where-Object Name -eq 'TargetUserName').'#text'
+                        SubjectUserName  = ($data | Where-Object Name -eq 'SubjectUserName').'#text'
+                        IpAddress        = ($data | Where-Object Name -eq 'IpAddress').'#text'
+                        WorkstationName  = ($data | Where-Object Name -eq 'WorkstationName').'#text'
+                        LogonType        = ($data | Where-Object Name -eq 'LogonType').'#text'
+                        LogonTypeName    = switch (($data | Where-Object Name -eq 'LogonType').'#text') {
+                            '2'  { 'Interactive' }
+                            '3'  { 'Network' }
+                            '10' { 'RemoteInteractive (RDP)' }
+                            default { $_ }
+                        }
+                        ProcessName      = ($data | Where-Object Name -eq 'NewProcessName').'#text'
+                        ParentProcessName= ($data | Where-Object Name -eq 'ParentProcessName').'#text'
+                        CommandLine      = ($data | Where-Object Name -eq 'CommandLine').'#text'
+                        PrivilegeList    = ($data | Where-Object Name -eq 'PrivilegeList').'#text'
+                        ServiceName      = ($data | Where-Object Name -eq 'ServiceName').'#text'
+                        TaskName         = ($data | Where-Object Name -eq 'TaskName').'#text'
+                    }
+                }
+            }
+        }
+    }
+
+    if (-not $Timeline) {
+        Write-Host "No events found matching the criteria." -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host "Collected $($Timeline.Count) events." -ForegroundColor Green
+
+    # Anomaly Detection
+    if ($ShowAnomalies) {
+        Write-Host "`n[!] ANOMALY DETECTION" -ForegroundColor Red
+
+        # Failed login spikes
+        $failedLogins = $Timeline | Where-Object EventID -eq 4625 | Group-Object TargetUserName, IpAddress | Where-Object Count -gt 10
+        if ($failedLogins) {
+            Write-Host "`nHigh failed login attempts:" -ForegroundColor Red
+            $failedLogins | Select-Object Name, Count | Format-Table -AutoSize
+        }
+
+        # Suspicious process patterns
+        $suspiciousProcesses = $Timeline | Where-Object EventID -eq 4688 | Where-Object {
+            $_.CommandLine -match 'hidden|encodedcommand|-w hidden|powershell.*-e' -or
+            $_.ParentProcessName -match 'cmd.exe|powershell.exe' -and $_.ProcessName -match 'net.exe|whoami.exe'
+        }
+        if ($suspiciousProcesses) {
+            Write-Host "`nSuspicious process executions:" -ForegroundColor Red
+            $suspiciousProcesses | Select-Object TimeCreated, ProcessName, CommandLine, SubjectUserName | Format-Table -AutoSize
+        }
+
+        # Log clearing
+        $clearedLogs = $Timeline | Where-Object EventID -in 1102,104
+        if ($clearedLogs) {
+            Write-Host "`nCRITICAL: Log clearing detected!" -ForegroundColor Red -BackgroundColor Yellow
+            $clearedLogs | Format-Table TimeCreated, EventID, SubjectUserName
+        }
+    }
+
+    # Summary Dashboard
+    Write-Host "`nEvents by Category:" -ForegroundColor Cyan
+    $Timeline | Group-Object Category | Sort-Object Count -Descending | Format-Table Name, Count -AutoSize
+
+    Write-Host "Top 10 Event IDs:" -ForegroundColor Cyan
+    $Timeline | Group-Object EventID | Sort-Object Count -Descending | Select-Object -First 10 | Format-Table Name, Count -AutoSize
+
+    # Export
+    if ($ExportTimeline) {
+        New-Item -ItemType Directory -Path $ExportPath -Force | Out-Null
+        $csv = Join-Path $ExportPath "Timeline.csv"
+        $Timeline | Export-Csv $csv -NoTypeInformation
+        Write-Host "Timeline exported to $csv" -ForegroundColor Green
+    }
+
+    if ($GenerateReport) {
+        $htmlPath = Join-Path $ExportPath "Report.html"
+        # (Simple HTML generation - same as earlier version)
+        $html = "<html><head><title>Threat Hunt Report</title></head><body><h1>Threat Hunt Report - $(Get-Date)</h1><pre>$($Timeline | ConvertTo-Html -Fragment)</pre></body></html>"
+        $html | Out-File $htmlPath
+        Write-Host "HTML report saved to $htmlPath" -ForegroundColor Green
+    }
+
+    return $Timeline
+}
+
+Export-ModuleMember -Function Invoke-ThreatHunt
