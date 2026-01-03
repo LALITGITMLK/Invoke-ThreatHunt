@@ -30,8 +30,8 @@ Invoke-ThreatHunt -HuntProfile Lateral -CorrelateEvents
 
 ## 📚 Documentation
 
-- [Quick Reference Cheat Sheet](docs/Quick_Reference_Complete.md)
-- [Full Documentation](docs/Full_Documentation_Complete.md)
+- [Quick Reference Cheat Sheet](docs/Quick_Reference.md)
+- [Full Documentation](docs/Full_Documentation.md)
 
 ## 🛠️ Installation
 ```powershell
@@ -102,3 +102,4 @@ MIT Licensed – use it, share it, improve it.
 If this tool helped you, please star the repository! ⭐
 
 **Happy hunting! 🔍**
+
