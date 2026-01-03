@@ -185,7 +185,7 @@ function Invoke-ThreatHunt {
                 $Timeline += $events | ForEach-Object {
                     $xml = [xml]$_.ToXml()
                     $data = $xml.Event.EventData.Data
-                    $props = $EventCatalog[$_.Id] ?? @{ Description = "Unknown Event"; Category = "Other"; Severity = "Info" }
+                    $props = if ($EventCatalog.ContainsKey($_.Id)) { $EventCatalog[$_.Id] } else { @{ Description = "Unknown Event"; Category = "Other"; Severity = "Info" } }
 
                     [pscustomobject]@{
                         TimeCreated      = $_.TimeCreated
@@ -280,4 +280,5 @@ function Invoke-ThreatHunt {
 }
 
 Export-ModuleMember -Function Invoke-ThreatHunt
+
 
