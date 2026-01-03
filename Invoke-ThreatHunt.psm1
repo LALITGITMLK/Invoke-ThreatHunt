@@ -67,7 +67,7 @@
     Full spectrum hunt of last 48 hours with timeline export and HTML report
 
 .NOTES
-    Author: SOC Threat Hunter
+    Author: LALLITGITMLK
     Version: 2.0
     Requires: PowerShell 5.1+, Administrator privileges for full log access
 #>
@@ -280,3 +280,4 @@ function Invoke-ThreatHunt {
 }
 
 Export-ModuleMember -Function Invoke-ThreatHunt
+
