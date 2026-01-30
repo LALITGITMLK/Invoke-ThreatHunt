@@ -86,6 +86,13 @@ Invoke-ThreatHunt -HuntProfile Lateral -Hours 48 -CorrelateEvents -ExportTimelin
 Invoke-ThreatHunt -ComputerName "DC01","WEB01" -HuntProfile Quick
 ```
 
+# Examples Snapshots
+![8d079701-7835-464f-89bd-052bb7a7620c](https://github.com/user-attachments/assets/a390e525-f0e2-4524-aa8b-cc852051be21)
+![80b008e4-4e3e-4712-ba6f-2cfc63ecf18a](https://github.com/user-attachments/assets/2613c7fc-45fe-4edd-bbc5-0e3c30992c6b)
+![368eb480-9341-4c95-86ef-baa9bfe1bd82](https://github.com/user-attachments/assets/c502185d-873f-4e8e-b735-a43fb5b19d6c)
+![024c5e36-622b-42d5-8b9a-754bfe55bfc2](https://github.com/user-attachments/assets/112394c0-7d9e-4c99-8238-92e3a34b81eb)
+
+
 ## 🤝 Contributing
 
 Contributions welcome! Feel free to:
@@ -102,4 +109,5 @@ MIT Licensed – use it, share it, improve it.
 If this tool helped you, please star the repository! ⭐
 
 **Happy hunting! 🔍**
+
 
