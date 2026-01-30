@@ -29,7 +29,7 @@ jobs:
         run: semgrep --config p/ci --include '**/*.ps1' --include '**/*.psm1' --json > semgrep-results.json || true
 
       - name: Upload semgrep results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: semgrep-results
           path: semgrep-results.json
