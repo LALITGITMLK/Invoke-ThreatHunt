@@ -1,0 +1,35 @@
+name: "Semgrep - PowerShell scan"
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 4 * * 0'  # weekly
+
+jobs:
+  semgrep:
+    name: Semgrep (PowerShell)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install semgrep
+        run: pip install semgrep
+
+      - name: Run semgrep (PowerShell)
+        run: semgrep --config p/ci --include '**/*.ps1' --include '**/*.psm1' --json > semgrep-results.json || true
+
+      - name: Upload semgrep results
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-results
+          path: semgrep-results.json
