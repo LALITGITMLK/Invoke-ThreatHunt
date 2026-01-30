@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # 1) Keep GitHub Actions up-to-date (recommended)
+  - package-ecosystem: "github-actions"
+    directory: "/" 
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 5
+    # optional: automerge, reviewers, ignore rules can be added here
+
+  # 2) Example: NuGet (useful if you depend on PowerShell modules distributed as NuGet)
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # 3) Add other ecosystems you use (uncomment and edit as needed)
+  # npm example (if repo has package.json)
+  #- package-ecosystem: "npm"
+  #  directory: "/"
+  #  schedule:
+  #    interval: "weekly"
+
+  # pip example (if you use requirements.txt)
+  #- package-ecosystem: "pip"
+  #  directory: "/"
+  #  schedule:
+  #    interval: "weekly"
